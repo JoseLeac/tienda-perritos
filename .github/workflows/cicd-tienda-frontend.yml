@@ -12,7 +12,7 @@ jobs:
 
     steps:
       - name: Checkout código
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4 # Actualizado a v4
 
       - name: Configurar credenciales AWS
         uses: aws-actions/configure-aws-credentials@v4
@@ -22,28 +22,50 @@ jobs:
           aws-session-token: ${{ secrets.AWS_SESSION_TOKEN }}
           aws-region: ${{ secrets.AWS_REGION }}
 
-      - name: Login en Amazon ECR (runner)
-        uses: aws-actions/amazon-ecr-login@v1
+      - name: Login en Amazon ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v2
 
-      - name: Build imagen Frontend y push a ECR
+      - name: Build y Push (Tag Dinámico)
+        id: build-image
+        env:
+          ECR_REGISTRY: ${{ steps.login-ecr.registry }}
+          REPO_NAME: tienda-frontend # Ajusta si tu repo se llama distinto
+          IMAGE_TAG: ${{ github.sha }}
         run: |
           cd frontend
-          docker build -t tienda-frontend .
-          docker tag tienda-frontend:latest ${{ secrets.ECR_REPO_URL_FRONTEND }}:latest
-          docker push ${{ secrets.ECR_REPO_URL_FRONTEND }}:latest
+          # Construimos con tag de commit y tag latest
+          docker build -t $ECR_REGISTRY/$REPO_NAME:$IMAGE_TAG -t $ECR_REGISTRY/$REPO_NAME:latest .
+          docker push $ECR_REGISTRY/$REPO_NAME:$IMAGE_TAG
+          docker push $ECR_REGISTRY/$REPO_NAME:latest
+          echo "image=$ECR_REGISTRY/$REPO_NAME:$IMAGE_TAG" >> $GITHUB_OUTPUT
 
-      - name: Desplegar Frontend vía SSM
+      - name: Desplegar vía SSM (Con Waiter)
         run: |
-          aws ssm send-command \
+          # Enviamos el comando y capturamos el ID
+          COMMAND_ID=$(aws ssm send-command \
             --instance-ids ${{ secrets.EC2_FRONTEND_INSTANCE_ID }} \
             --document-name "AWS-RunShellScript" \
-            --comment "Actualizar tienda-frontend desde ECR" \
-            --parameters '{"commands":[
-              "set -e",
-              "aws ecr get-login-password --region '${{ secrets.AWS_REGION }}' | docker login --username AWS --password-stdin ${{ secrets.ECR_REGISTRY }}",
-              "docker pull ${{ secrets.ECR_REPO_URL_FRONTEND }}:latest",
-              "docker stop tienda-frontend || true",
-              "docker rm tienda-frontend || true",
-              "docker run -d --name tienda-frontend -p 80:80 ${{ secrets.ECR_REPO_URL_FRONTEND }}:latest"
-            ]}' \
-            --output text
+            --comment "Deploy Frontend version ${{ github.sha }}" \
+            --parameters '{
+              "commands":[
+                "set -e",
+                "aws ecr get-login-password --region ${{ secrets.AWS_REGION }} | docker login --username AWS --password-stdin ${{ steps.login-ecr.registry }}",
+                "docker pull ${{ steps.build-image.outputs.image }}",
+                "docker stop tienda-frontend || true",
+                "docker rm tienda-frontend || true",
+                "docker run -d --name tienda-frontend -p 80:80 ${{ steps.build-image.outputs.image }}",
+                "docker image prune -f"
+              ]
+            }' \
+            --query "Command.CommandId" \
+            --output text)
+
+          echo "Comando SSM enviado. ID: $COMMAND_ID"
+
+          # IMPORTANTE: Esperar a que el comando termine en la EC2
+          aws ssm wait command-executed \
+            --command-id "$COMMAND_ID" \
+            --instance-id ${{ secrets.EC2_FRONTEND_INSTANCE_ID }}
+
+          echo "Despliegue completado con éxito."
