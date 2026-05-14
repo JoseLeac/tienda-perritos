@@ -41,7 +41,7 @@ jobs:
         run: |
           cd frontend
 
-          # 1. Construir la imagen base localmente en el runner
+          # 1. Construir la imagen en github action(ubuntu)
           docker build -t tienda-frontend .
 
           # 2. Etiquetar y subir a Amazon ECR (Tu entorno privado en AWS)
