@@ -8,8 +8,8 @@ CREATE TABLE IF NOT EXISTS productos (
     precio DECIMAL(10,2) NOT NULL,
     stock INT NOT NULL
 );
-//parte para perritoss
-INSERT INTO productos (nombre, descripcion, precio, stock) VALUES
+//parte para perritos1
+ INSERT INTO productos (nombre, descripcion, precio, stock) VALUES
 ('Alimento Cachorro Premium', 'Sabor a jamon, razas pequenas', 19990, 15),
 ('Alimento Adulto Light', 'Control de peso, razas medianas', 17990, 8),
 ('Snacks Dentales', 'Ayuda a la limpieza dental', 5990, 30),
